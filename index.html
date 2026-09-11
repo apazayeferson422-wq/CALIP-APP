@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#1f7a4d">
+<title>CALIP · Sistema de Inventarios</title>
+<link rel="stylesheet" href="styles.css?v=1.0.0">
+</head>
+<body>
+<main id="loginView" class="center">
+<section class="card login-card">
+<h1>CALIP</h1><p class="muted">Sistema de Inventarios</p>
+<form id="loginForm">
+<label>Usuario o correo</label><input id="usuario" required autocomplete="username">
+<label>Contraseña</label><input id="password" type="password" required autocomplete="current-password">
+<button type="submit">Ingresar</button>
+</form>
+<p id="loginMsg" class="msg"></p>
+</section>
+</main>
+
+<main id="appView" class="hidden">
+<header class="topbar">
+<div><strong>CALIP</strong><span class="muted"> · Sistema de Inventarios</span></div>
+<div class="session"><span id="sessionUser"></span><button id="logoutBtn" class="secondary">Salir</button></div>
+</header>
+<nav class="tabs">
+<button class="tab active" data-section="inicio">Inicio</button>
+<button class="tab" data-section="productos">Productos</button>
+<button class="tab" data-section="inventario">Inventario</button>
+</nav>
+
+<section id="inicio" class="section">
+<div class="hero card">
+<h2>Menú principal</h2>
+<p>Base independiente de CALIP conectada a tu Supabase.</p>
+<div class="grid">
+<button class="module" data-go="productos">📦 Productos</button>
+<button class="module" data-go="inventario">🧮 Inventario</button>
+</div>
+</div>
+</section>
+
+<section id="productos" class="section hidden">
+<div class="card">
+<div class="section-head"><div><h2>Productos</h2><p class="muted">Consulta de la tabla productos.</p></div><button id="reloadProducts" class="secondary">Actualizar</button></div>
+<input id="productSearch" placeholder="Buscar producto, código o código de fábrica...">
+<p id="productsMsg" class="msg"></p>
+<div class="table-wrap"><table><thead><tr><th>Código</th><th>Descripción</th><th>Código fábrica</th><th>UM</th></tr></thead><tbody id="productsBody"></tbody></table></div>
+</div>
+</section>
+
+<section id="inventario" class="section hidden">
+<div class="card">
+<h2>Inventario</h2>
+<p class="muted">Registro local inicial. La sincronización se añadirá después de validar el esquema exacto.</p>
+<div class="inventory-form"><input id="invSearch" placeholder="Buscar producto..."><input id="invQty" type="number" min="0" step="0.01" placeholder="Cantidad contada"><button id="saveCount">Guardar conteo</button></div>
+<p id="inventoryMsg" class="msg"></p>
+<div class="table-wrap"><table><thead><tr><th>Código</th><th>Producto</th><th>Conteo</th><th>Fecha</th></tr></thead><tbody id="inventoryBody"></tbody></table></div>
+</div>
+</section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js?v=1.0.0"></script>
+<script src="app.js?v=1.0.0"></script>
+</body></html>
