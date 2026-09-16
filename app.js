@@ -4,7 +4,19 @@ const $=id=>document.getElementById(id);let products=[];let localCounts=JSON.par
 function msg(id,text,ok=false){$(id).textContent=text;$(id).style.color=ok?"#17633f":"#a12d35"}function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}function pick(o,...keys){for(const k of keys)if(o&&o[k]!=null)return o[k];return ""}
 function usuarioAEmail(v){const u=String(v||"").trim().toLowerCase();return u.includes("@")?u:u+"@gmail.com"}
 function showOnly(id){["loginView","recoveryView","appView"].forEach(x=>$(x).classList.add("hidden"));$(id).classList.remove("hidden")}
-async function init(){if(!cfg.SUPABASE_URL||!cfg.SUPABASE_PUBLISHABLE_KEY){msg("loginMsg","Falta configurar config.js");return}const {data:{session}}=await sb.auth.getSession();if(session){enterApp(session.user)}}
+function recoveryLink(){
+  const h=window.location.hash||"";
+  return h.includes("access_token=") && (h.includes("type=recovery") || h.includes("refresh_token="));
+}
+async function init(){
+  if(!cfg.SUPABASE_URL||!cfg.SUPABASE_PUBLISHABLE_KEY){msg("loginMsg","Falta configurar config.js");return}
+  if(recoveryLink()){
+    showOnly("recoveryView");
+    return;
+  }
+  const {data:{session}}=await sb.auth.getSession();
+  if(session){enterApp(session.user)}
+}
 async function login(e){e.preventDefault();msg("loginMsg","");const {data,error}=await sb.auth.signInWithPassword({email:usuarioAEmail($("usuario").value),password:$("password").value});if(error){msg("loginMsg","Usuario o contraseña incorrectos: "+error.message);return}enterApp(data.user)}
 async function setNewPassword(e){e.preventDefault();msg("recoveryMsg","");const p=$("newPassword").value,p2=$("newPassword2").value;if(p.length<6){msg("recoveryMsg","La contraseña debe tener al menos 6 caracteres.");return}if(p!==p2){msg("recoveryMsg","Las contraseñas no coinciden.");return}const {error}=await sb.auth.updateUser({password:p});if(error){msg("recoveryMsg","No se pudo cambiar la contraseña: "+error.message);return}msg("recoveryMsg","Contraseña actualizada. Entrando a CALIP...",true);setTimeout(async()=>{const {data}=await sb.auth.getUser();enterApp(data.user)},500)}
 function enterApp(user){showOnly("appView");$("sessionUser").textContent=user?.email||"";loadProducts();renderCounts()}
@@ -13,7 +25,15 @@ async function loadProducts(){msg("productsMsg","Cargando...",true);const {data,
 function renderProducts(){const q=$("productSearch").value.trim().toLowerCase();const rows=products.filter(p=>JSON.stringify(p).toLowerCase().includes(q)).slice(0,500);$("productsBody").innerHTML=rows.map(p=>`<tr><td>${esc(pick(p,"codigo","cod","id"))}</td><td>${esc(pick(p,"descripcion","nombre","desc_material"))}</td><td>${esc(pick(p,"codigo_fabrica","cod_fabrica","codigo_factory"))}</td><td>${esc(pick(p,"um","unidad_medida"))}</td></tr>`).join("")}
 function renderCounts(){$("inventoryBody").innerHTML=localCounts.map(x=>`<tr><td>${esc(x.codigo)}</td><td>${esc(x.descripcion)}</td><td>${esc(x.cantidad)}</td><td>${esc(x.fecha)}</td></tr>`).join("")}
 function saveCount(){const q=$("invSearch").value.trim().toLowerCase();const p=products.find(x=>JSON.stringify(x).toLowerCase().includes(q));const qty=$("invQty").value;if(!p){msg("inventoryMsg","Primero busca un producto válido.");return}if(qty===""){msg("inventoryMsg","Ingresa la cantidad.");return}localCounts.unshift({codigo:pick(p,"codigo","cod","id"),descripcion:pick(p,"descripcion","nombre","desc_material"),cantidad:Number(qty),fecha:new Date().toLocaleString("es-PE")});localStorage.setItem("calip_counts",JSON.stringify(localCounts));renderCounts();msg("inventoryMsg","Conteo guardado en este dispositivo.",true)}
-sb.auth.onAuthStateChange((event,session)=>{if(event==="PASSWORD_RECOVERY"){showOnly("recoveryView")}else if(event==="SIGNED_OUT"){showOnly("loginView")}else if(event==="SIGNED_IN"&&session&&!$("recoveryView").classList.contains("hidden")){/* keep recovery screen */}});
+sb.auth.onAuthStateChange((event,session)=>{
+  if(event==="PASSWORD_RECOVERY"){
+    showOnly("recoveryView");
+  }else if(event==="SIGNED_OUT"){
+    showOnly("loginView");
+  }else if(event==="SIGNED_IN" && session && recoveryLink()){
+    showOnly("recoveryView");
+  }
+});
 $("loginForm").addEventListener("submit",login);$("recoveryForm").addEventListener("submit",setNewPassword);$("logoutBtn").addEventListener("click",logout);$("reloadProducts").addEventListener("click",loadProducts);$("productSearch").addEventListener("input",renderProducts);$("saveCount").addEventListener("click",saveCount);$("invSearch").addEventListener("input",()=>{});
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".section").forEach(x=>x.classList.add("hidden"));$(b.dataset.section).classList.remove("hidden")}));document.querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>document.querySelector(`[data-section="${b.dataset.go}"]`).click()));
 init();
