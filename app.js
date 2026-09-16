@@ -252,55 +252,57 @@ function renderCounts() {
   body.innerHTML = counts
     .map((c) => {
       const code = getValue(c, ["codigo", "cod", "id"]);
+
       const desc = getValue(c, [
         "descripcion",
         "nombre",
         "desc_material"
       ]);
+
       const line = getValue(c, ["linea", "línea"]);
 
-      const qty = Number(
+      const conteo = Number(
         getValue(c, ["cantidad", "conteo", "qty"]) || 0
       );
 
-      const stock = stocks
-        .filter(
-          (s) =>
-            String(getValue(s, ["codigo", "cod", "id"])) ===
-            String(code)
-        )
-        .reduce(
-          (total, s) =>
-            total + Number(getValue(s, ["cantidad", "stock"]) || 0),
-          0
-        );
+      // Buscar el producto correspondiente
+      const product = products.find(
+        (p) =>
+          String(productCode(p)) === String(code)
+      );
 
-      const difference = qty - stock;
+      // Stock teórico proveniente de la tabla productos
+      const stock = product
+        ? Number(product.stock_teorico || 0)
+        : 0;
 
-      const date =
-        getValue(c, ["fecha", "fecha_conteo", "created_at"]) || "";
+      // Diferencia = Conteo - Stock
+      const diferencia = conteo - stock;
 
-      const expiration =
+      const vencimiento =
         getValue(c, ["vencimiento"]) || "";
 
-      const boxes =
+      const cajas =
         Number(getValue(c, ["cajas"]) || 0);
 
-      const units =
+      const unidades =
         Number(getValue(c, ["unidades"]) || 0);
+
+      const fecha =
+        getValue(c, ["fecha", "fecha_conteo", "created_at"]) || "";
 
       return `
         <tr>
           <td>${esc(code)}</td>
           <td>${esc(desc)}</td>
           <td>${esc(line)}</td>
-          <td>${esc(expiration)}</td>
+          <td>${esc(vencimiento)}</td>
           <td>${stock}</td>
-          <td>${qty}</td>
-          <td>${difference}</td>
-          <td>${boxes}</td>
-          <td>${units}</td>
-          <td>${esc(date)}</td>
+          <td>${conteo}</td>
+          <td>${diferencia}</td>
+          <td>${cajas}</td>
+          <td>${unidades}</td>
+          <td>${esc(fecha)}</td>
         </tr>
       `;
     })
