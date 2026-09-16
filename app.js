@@ -6,7 +6,7 @@ function usuarioAEmail(v){const u=String(v||"").trim().toLowerCase();return u.in
 function showOnly(id){["loginView","recoveryView","appView"].forEach(x=>$(x).classList.add("hidden"));$(id).classList.remove("hidden")}
 function recoveryLink(){
   const h=window.location.hash||"";
-  return h.includes("access_token=") && (h.includes("type=recovery") || h.includes("refresh_token="));
+  return h.includes("access_token=");
 }
 async function init(){
   if(!cfg.SUPABASE_URL||!cfg.SUPABASE_PUBLISHABLE_KEY){msg("loginMsg","Falta configurar config.js");return}

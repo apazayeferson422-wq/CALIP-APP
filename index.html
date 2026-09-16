@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1f7a4d"><title>CALIP · Sistema de Inventarios</title>
-<link rel="stylesheet" href="styles.css?v=1.0.2">
+<link rel="stylesheet" href="styles.css?v=1.0.3">
 </head>
 <body>
 <main id="loginView" class="center">
@@ -35,5 +35,5 @@
 <section id="inventario" class="section hidden"><div class="card"><h2>Inventario</h2><p class="muted">Conteo temporal en este dispositivo. Luego conectaremos el guardado permanente cuando confirmemos la tabla de inventario.</p><div class="inventory-form"><input id="invSearch" placeholder="Buscar producto..."><input id="invQty" type="number" min="0" step="0.01" placeholder="Cantidad contada"><button id="saveCount">Guardar conteo</button></div><p id="inventoryMsg" class="msg"></p><div class="table-wrap"><table><thead><tr><th>Código</th><th>Producto</th><th>Conteo</th><th>Fecha</th></tr></thead><tbody id="inventoryBody"></tbody></table></div></div></section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=1.0.2"></script><script src="app.js?v=1.0.2"></script>
+<script src="config.js?v=1.0.3"></script><script src="app.js?v=1.0.3"></script>
 </body></html>
