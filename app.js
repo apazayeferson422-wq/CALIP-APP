@@ -1,89 +1,684 @@
-const cfg=window.CALIP_CONFIG||{};
-const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storage:window.localStorage}});
-const $=id=>document.getElementById(id);
-let products=[];
-let localCounts=JSON.parse(localStorage.getItem("calip_counts")||"[]");
-let recoveryMode=false;
+const cfg = window.CALIP_CONFIG || {};
 
-function msg(id,text,ok=false){const el=$(id);if(!el)return;el.textContent=text;el.style.color=ok?"#17633f":"#a12d35"}
-function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
-function pick(o,...keys){for(const k of keys)if(o&&o[k]!=null)return o[k];return ""}
-function usuarioAEmail(v){const u=String(v||"").trim().toLowerCase();return u.includes("@")?u:u+"@gmail.com"}
-function showOnly(id){["loginView","recoveryView","appView"].forEach(x=>$(x).classList.add("hidden"));$(id).classList.remove("hidden")}
-function hashParams(){return new URLSearchParams((location.hash||"").replace(/^#/,""))}
-function hasRecoveryTokens(){const h=hashParams();return !!(h.get("access_token")&&h.get("refresh_token"))}
-
-async function init(){
-  if(!cfg.SUPABASE_URL||!cfg.SUPABASE_PUBLISHABLE_KEY){msg("loginMsg","Falta configurar config.js");return}
-
-  // Flujo de recuperación con tokens en el hash.
-  if(hasRecoveryTokens()){
-    recoveryMode=true;
-    showOnly("recoveryView");
-    msg("recoveryMsg","Preparando cambio de contraseña...",true);
-    const h=hashParams();
-    const {error}=await sb.auth.setSession({access_token:h.get("access_token"),refresh_token:h.get("refresh_token")});
-    if(error){msg("recoveryMsg","El enlace de recuperación no es válido o ya venció. Solicita un nuevo correo.");return}
-    history.replaceState({},document.title,location.pathname+location.search);
-    msg("recoveryMsg","Escribe tu nueva contraseña.",true);
-    return;
+const sb = window.supabase.createClient(
+  cfg.SUPABASE_URL,
+  cfg.SUPABASE_PUBLISHABLE_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: window.localStorage
+    }
   }
+);
 
-  // Flujo PKCE por ?code=...
-  const code=new URLSearchParams(location.search).get("code");
-  if(code){
-    recoveryMode=true;
-    showOnly("recoveryView");
-    msg("recoveryMsg","Preparando cambio de contraseña...",true);
-    const {error}=await sb.auth.exchangeCodeForSession(code);
-    if(error){msg("recoveryMsg","El enlace de recuperación no es válido o ya venció. Solicita un nuevo correo.");return}
-    history.replaceState({},document.title,location.pathname);
-    msg("recoveryMsg","Escribe tu nueva contraseña.",true);
-    return;
-  }
+const $ = id => document.getElementById(id);
 
-  const {data:{session}}=await sb.auth.getSession();
-  if(session)enterApp(session.user);else showOnly("loginView");
+let products = [];
+let selectedProduct = null;
+let counts = [];
+
+function msg(id, text, ok = false) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = ok ? "#17633f" : "#a12d35";
 }
 
-async function login(e){
-  e.preventDefault();msg("loginMsg","");
-  const {data,error}=await sb.auth.signInWithPassword({email:usuarioAEmail($("usuario").value),password:$("password").value});
-  if(error){msg("loginMsg","Usuario o contraseña incorrectos: "+error.message);return}
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, m => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[m]));
+}
+
+function pick(o, ...keys) {
+  for (const k of keys) {
+    if (o && o[k] !== undefined && o[k] !== null && o[k] !== "") {
+      return o[k];
+    }
+  }
+  return "";
+}
+
+function usuarioAEmail(v) {
+  const u = String(v || "").trim().toLowerCase();
+  if (!u) return "";
+  return u.includes("@") ? u : u + "@gmail.com";
+}
+
+function showOnly(id) {
+  ["loginView", "recoveryView", "appView"].forEach(x => {
+    const el = $(x);
+    if (el) el.classList.add("hidden");
+  });
+
+  const target = $(id);
+  if (target) target.classList.remove("hidden");
+}
+
+/* =========================
+   INICIO
+========================= */
+
+async function init() {
+  if (
+    !cfg.SUPABASE_URL ||
+    !cfg.SUPABASE_PUBLISHABLE_KEY
+  ) {
+    msg("loginMsg", "Falta configurar la conexión con Supabase.");
+    return;
+  }
+
+  /*
+    Si venimos de un correo de recuperación,
+    mostramos directamente la pantalla de nueva contraseña.
+  */
+  const hash = window.location.hash || "";
+
+  if (
+    hash.includes("access_token=") &&
+    (
+      hash.includes("type=recovery") ||
+      hash.includes("type%3Drecovery")
+    )
+  ) {
+    showOnly("recoveryView");
+  }
+
+  const { data } = await sb.auth.getSession();
+
+  if (data && data.session) {
+    /*
+      Si es una recuperación, no entrar todavía
+      al sistema: primero cambiar contraseña.
+    */
+    if (
+      hash.includes("type=recovery") ||
+      hash.includes("type%3Drecovery")
+    ) {
+      showOnly("recoveryView");
+    } else {
+      enterApp(data.session.user);
+    }
+  }
+}
+
+/* =========================
+   LOGIN
+========================= */
+
+async function login(e) {
+  e.preventDefault();
+
+  msg("loginMsg", "Ingresando...", true);
+
+  const email = usuarioAEmail($("usuario").value);
+  const password = $("password").value;
+
+  const { data, error } = await sb.auth.signInWithPassword({
+    email,
+    password
+  });
+
+  if (error) {
+    msg(
+      "loginMsg",
+      "Usuario o contraseña incorrectos."
+    );
+    return;
+  }
+
   enterApp(data.user);
 }
 
-async function setNewPassword(e){
-  e.preventDefault();msg("recoveryMsg","");
-  const p=$("newPassword").value,p2=$("newPassword2").value;
-  if(p.length<6){msg("recoveryMsg","La contraseña debe tener al menos 6 caracteres.");return}
-  if(p!==p2){msg("recoveryMsg","Las contraseñas no coinciden.");return}
-  const {error}=await sb.auth.updateUser({password:p});
-  if(error){msg("recoveryMsg","No se pudo cambiar la contraseña: "+error.message);return}
-  recoveryMode=false;
-  msg("recoveryMsg","Contraseña actualizada. Entrando a CALIP...",true);
-  setTimeout(async()=>{const {data}=await sb.auth.getUser();enterApp(data.user)},600);
+/* =========================
+   RECUPERAR CONTRASEÑA
+========================= */
+
+async function setNewPassword(e) {
+  e.preventDefault();
+
+  msg("recoveryMsg", "Guardando contraseña...", true);
+
+  const password = $("newPassword").value;
+  const password2 = $("newPassword2").value;
+
+  if (password.length < 6) {
+    msg(
+      "recoveryMsg",
+      "La contraseña debe tener al menos 6 caracteres."
+    );
+    return;
+  }
+
+  if (password !== password2) {
+    msg(
+      "recoveryMsg",
+      "Las contraseñas no coinciden."
+    );
+    return;
+  }
+
+  const { data: sessionData } = await sb.auth.getSession();
+
+  if (!sessionData || !sessionData.session) {
+    msg(
+      "recoveryMsg",
+      "El enlace de recuperación no tiene una sesión válida. Solicita un nuevo enlace cuando Supabase permita enviarlo."
+    );
+    return;
+  }
+
+  const { error } = await sb.auth.updateUser({
+    password
+  });
+
+  if (error) {
+    msg(
+      "recoveryMsg",
+      "No se pudo cambiar la contraseña: " + error.message
+    );
+    return;
+  }
+
+  msg(
+    "recoveryMsg",
+    "Contraseña actualizada correctamente. Entrando a CALIP...",
+    true
+  );
+
+  /*
+    Limpiamos el enlace de recuperación
+    para que no vuelva a abrir la pantalla.
+  */
+  window.history.replaceState(
+    {},
+    document.title,
+    window.location.pathname + window.location.search
+  );
+
+  setTimeout(async () => {
+    const { data } = await sb.auth.getUser();
+
+    if (data && data.user) {
+      enterApp(data.user);
+    } else {
+      showOnly("loginView");
+    }
+  }, 800);
 }
 
-function enterApp(user){recoveryMode=false;showOnly("appView");$("sessionUser").textContent=user?.email||"";loadProducts();renderCounts()}
-async function logout(){await sb.auth.signOut();recoveryMode=false;showOnly("loginView")}
-async function loadProducts(){msg("productsMsg","Cargando...",true);const {data,error}=await sb.from("productos").select("*");if(error){msg("productsMsg","No se pudieron cargar productos: "+error.message);return}products=data||[];renderProducts();msg("productsMsg",`${products.length} productos cargados.`,true)}
-function renderProducts(){const q=$("productSearch").value.trim().toLowerCase();const rows=products.filter(p=>JSON.stringify(p).toLowerCase().includes(q)).slice(0,500);$("productsBody").innerHTML=rows.map(p=>`<tr><td>${esc(pick(p,"codigo","cod","id"))}</td><td>${esc(pick(p,"descripcion","nombre","desc_material"))}</td><td>${esc(pick(p,"codigo_fabrica","cod_fabrica","codigo_factory"))}</td><td>${esc(pick(p,"um","unidad_medida"))}</td></tr>`).join("")}
-function renderCounts(){$("inventoryBody").innerHTML=localCounts.map(x=>`<tr><td>${esc(x.codigo)}</td><td>${esc(x.descripcion)}</td><td>${esc(x.cantidad)}</td><td>${esc(x.fecha)}</td></tr>`).join("")}
-function saveCount(){const q=$("invSearch").value.trim().toLowerCase();const p=products.find(x=>JSON.stringify(x).toLowerCase().includes(q));const qty=$("invQty").value;if(!p){msg("inventoryMsg","Primero busca un producto válido.");return}if(qty===""){msg("inventoryMsg","Ingresa la cantidad.");return}localCounts.unshift({codigo:pick(p,"codigo","cod","id"),descripcion:pick(p,"descripcion","nombre","desc_material"),cantidad:Number(qty),fecha:new Date().toLocaleString("es-PE")});localStorage.setItem("calip_counts",JSON.stringify(localCounts));renderCounts();msg("inventoryMsg","Conteo guardado en este dispositivo.",true)}
+/* =========================
+   ENTRAR AL SISTEMA
+========================= */
 
-sb.auth.onAuthStateChange((event,session)=>{
-  if(event==="PASSWORD_RECOVERY"||recoveryMode){showOnly("recoveryView");}
-  else if(event==="SIGNED_OUT"){showOnly("loginView");}
-  else if(event==="SIGNED_IN"&&session){enterApp(session.user)}
+function enterApp(user) {
+  showOnly("appView");
+
+  if ($("sessionUser")) {
+    $("sessionUser").textContent = user?.email || "";
+  }
+
+  loadProducts();
+  loadCounts();
+}
+
+/* =========================
+   CERRAR SESIÓN
+========================= */
+
+async function logout() {
+  await sb.auth.signOut();
+  showOnly("loginView");
+}
+
+/* =========================
+   PRODUCTOS
+========================= */
+
+async function loadProducts() {
+  msg("productsMsg", "Cargando productos...", true);
+
+  const { data, error } = await sb
+    .from("productos")
+    .select("*");
+
+  if (error) {
+    msg(
+      "productsMsg",
+      "No se pudieron cargar productos: " + error.message
+    );
+    return;
+  }
+
+  products = data || [];
+
+  renderProducts();
+
+  msg(
+    "productsMsg",
+    `${products.length} productos cargados correctamente.`,
+    true
+  );
+}
+
+function renderProducts() {
+  const search = String(
+    $("productSearch")?.value || ""
+  ).trim().toLowerCase();
+
+  const rows = products
+    .filter(p =>
+      JSON.stringify(p)
+        .toLowerCase()
+        .includes(search)
+    )
+    .slice(0, 500);
+
+  if (!$("productsBody")) return;
+
+  $("productsBody").innerHTML = rows.map(p => `
+    <tr>
+      <td>${esc(pick(p, "codigo", "cod", "id"))}</td>
+      <td>${esc(pick(p, "descripcion", "nombre", "desc_material"))}</td>
+      <td>${esc(pick(p, "codigo_fabrica", "cod_fabrica", "codigo_factory"))}</td>
+      <td>${esc(pick(p, "um", "unidad_medida"))}</td>
+    </tr>
+  `).join("");
+}
+
+/* =========================
+   BUSCAR PRODUCTO INVENTARIO
+========================= */
+
+function searchInventoryProduct() {
+  const q = String(
+    $("invSearch")?.value || ""
+  ).trim().toLowerCase();
+
+  if (!q) {
+    selectedProduct = null;
+
+    if ($("selectedProduct")) {
+      $("selectedProduct").innerHTML =
+        "Busca un producto por código o descripción.";
+    }
+
+    return;
+  }
+
+  selectedProduct = products.find(p =>
+    JSON.stringify(p)
+      .toLowerCase()
+      .includes(q)
+  );
+
+  if (!selectedProduct) {
+    if ($("selectedProduct")) {
+      $("selectedProduct").innerHTML =
+        "<span>No se encontró el producto.</span>";
+    }
+
+    return;
+  }
+
+  const codigo = pick(
+    selectedProduct,
+    "codigo",
+    "cod",
+    "id"
+  );
+
+  const descripcion = pick(
+    selectedProduct,
+    "descripcion",
+    "nombre",
+    "desc_material"
+  );
+
+  const linea = pick(
+    selectedProduct,
+    "linea",
+    "línea"
+  );
+
+  if ($("selectedProduct")) {
+    $("selectedProduct").innerHTML = `
+      <strong>${esc(codigo)}</strong> —
+      ${esc(descripcion)}
+      ${linea ? `<br><small>${esc(linea)}</small>` : ""}
+    `;
+  }
+}
+
+/* =========================
+   GUARDAR CONTEO REAL
+========================= */
+
+async function saveCount() {
+  if (!selectedProduct) {
+    searchInventoryProduct();
+  }
+
+  if (!selectedProduct) {
+    msg(
+      "inventoryMsg",
+      "Primero busca y selecciona un producto."
+    );
+    return;
+  }
+
+  const cantidadValue = $("invQty")?.value || "";
+  const cajasValue = $("invCajas")?.value || "0";
+  const unidadesValue = $("invUnidades")?.value || "0";
+  const vencimientoValue = $("invVencimiento")?.value || "";
+
+  if (cantidadValue === "") {
+    msg(
+      "inventoryMsg",
+      "Ingresa la cantidad contada."
+    );
+    return;
+  }
+
+  if (!vencimientoValue) {
+    msg(
+      "inventoryMsg",
+      "Ingresa la fecha de vencimiento."
+    );
+    return;
+  }
+
+  const codigo = String(
+    pick(selectedProduct, "codigo", "cod", "id")
+  );
+
+  const descripcion = String(
+    pick(
+      selectedProduct,
+      "descripcion",
+      "nombre",
+      "desc_material"
+    )
+  );
+
+  const linea = String(
+    pick(selectedProduct, "linea", "línea")
+  );
+
+  const cantidad = Number(cantidadValue);
+  const cajas = Number(cajasValue || 0);
+  const unidades = Number(unidadesValue || 0);
+
+  const fecha = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  /*
+    ID único del registro.
+  */
+  const id =
+    codigo +
+    "_" +
+    vencimientoValue +
+    "_" +
+    Date.now();
+
+  msg(
+    "inventoryMsg",
+    "Guardando en Supabase...",
+    true
+  );
+
+  const { error } = await sb
+    .from("lotes_conteo")
+    .insert({
+      id,
+      codigo,
+      descripcion,
+      linea,
+      cantidad,
+      cajas,
+      unidades,
+      vencimiento: vencimientoValue,
+      fecha,
+      usuario: usuarioActual()
+    });
+
+  if (error) {
+    msg(
+      "inventoryMsg",
+      "No se pudo guardar: " + error.message
+    );
+    return;
+  }
+
+  msg(
+    "inventoryMsg",
+    "✓ Conteo guardado correctamente en Supabase.",
+    true
+  );
+
+  limpiarFormulario();
+  await loadCounts();
+}
+
+/* =========================
+   USUARIO ACTUAL
+========================= */
+
+function usuarioActual() {
+  const email =
+    $("sessionUser")?.textContent || "";
+
+  if (email.includes("@")) {
+    return email.split("@")[0];
+  }
+
+  return email;
+}
+
+/* =========================
+   LEER CONTEOS DE SUPABASE
+========================= */
+
+async function loadCounts() {
+  if (!$("inventoryBody")) return;
+
+  const { data, error } = await sb
+    .from("lotes_conteo")
+    .select("*")
+    .order("created_at", {
+      ascending: false
+    })
+    .limit(500);
+
+  if (error) {
+    msg(
+      "inventoryMsg",
+      "No se pudieron cargar los conteos: " +
+      error.message
+    );
+    return;
+  }
+
+  counts = data || [];
+
+  renderCounts();
+}
+
+/* =========================
+   MOSTRAR CONTEOS
+========================= */
+
+function renderCounts() {
+  if (!$("inventoryBody")) return;
+
+  $("inventoryBody").innerHTML = counts.map(x => `
+    <tr>
+      <td>${esc(x.codigo)}</td>
+      <td>${esc(x.descripcion)}</td>
+      <td>${esc(x.linea)}</td>
+      <td>${esc(x.cantidad)}</td>
+      <td>${esc(x.cajas)}</td>
+      <td>${esc(x.unidades)}</td>
+      <td>${esc(x.vencimiento)}</td>
+      <td>${esc(x.fecha)}</td>
+      <td>${esc(x.usuario)}</td>
+    </tr>
+  `).join("");
+}
+
+/* =========================
+   LIMPIAR FORMULARIO
+========================= */
+
+function limpiarFormulario() {
+  selectedProduct = null;
+
+  if ($("invSearch")) $("invSearch").value = "";
+  if ($("invQty")) $("invQty").value = "";
+  if ($("invCajas")) $("invCajas").value = "0";
+  if ($("invUnidades")) $("invUnidades").value = "0";
+  if ($("invVencimiento")) $("invVencimiento").value = "";
+
+  if ($("selectedProduct")) {
+    $("selectedProduct").textContent =
+      "Busca un producto por código o descripción.";
+  }
+}
+
+/* =========================
+   AUTENTICACIÓN
+========================= */
+
+sb.auth.onAuthStateChange((event, session) => {
+
+  if (event === "PASSWORD_RECOVERY") {
+    showOnly("recoveryView");
+    return;
+  }
+
+  if (event === "SIGNED_OUT") {
+    showOnly("loginView");
+    return;
+  }
+
+  if (
+    event === "SIGNED_IN" &&
+    session
+  ) {
+    const hash = window.location.hash || "";
+
+    if (
+      hash.includes("type=recovery") ||
+      hash.includes("type%3Drecovery")
+    ) {
+      showOnly("recoveryView");
+      return;
+    }
+
+    enterApp(session.user);
+  }
 });
 
-$("loginForm").addEventListener("submit",login);
-$("recoveryForm").addEventListener("submit",setNewPassword);
-$("logoutBtn").addEventListener("click",logout);
-$("reloadProducts").addEventListener("click",loadProducts);
-$("productSearch").addEventListener("input",renderProducts);
-$("saveCount").addEventListener("click",saveCount);
-document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".section").forEach(x=>x.classList.add("hidden"));$(b.dataset.section).classList.remove("hidden")}));
-document.querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>document.querySelector(`[data-section="${b.dataset.go}"]`).click()));
-init();
+/* =========================
+   EVENTOS
+========================= */
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  $("loginForm")?.addEventListener(
+    "submit",
+    login
+  );
+
+  $("recoveryForm")?.addEventListener(
+    "submit",
+    setNewPassword
+  );
+
+  $("logoutBtn")?.addEventListener(
+    "click",
+    logout
+  );
+
+  $("reloadProducts")?.addEventListener(
+    "click",
+    loadProducts
+  );
+
+  $("productSearch")?.addEventListener(
+    "input",
+    renderProducts
+  );
+
+  $("invSearch")?.addEventListener(
+    "input",
+    searchInventoryProduct
+  );
+
+  $("saveCount")?.addEventListener(
+    "click",
+    saveCount
+  );
+
+  document
+    .querySelectorAll(".tab")
+    .forEach(button => {
+
+      button.addEventListener(
+        "click",
+        () => {
+
+          document
+            .querySelectorAll(".tab")
+            .forEach(x =>
+              x.classList.remove("active")
+            );
+
+          button.classList.add("active");
+
+          document
+            .querySelectorAll(".section")
+            .forEach(x =>
+              x.classList.add("hidden")
+            );
+
+          const section =
+            $(button.dataset.section);
+
+          if (section) {
+            section.classList.remove("hidden");
+          }
+        }
+      );
+    });
+
+  document
+    .querySelectorAll("[data-go]")
+    .forEach(button => {
+
+      button.addEventListener(
+        "click",
+        () => {
+
+          const target =
+            document.querySelector(
+              `[data-section="${button.dataset.go}"]`
+            );
+
+          if (target) {
+            target.click();
+          }
+        }
+      );
+    });
+
+  init();
+});
