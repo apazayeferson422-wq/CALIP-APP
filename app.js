@@ -1,12 +1,438 @@
-const cfg=window.CALIP_CONFIG||{}; const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY); const $=id=>document.getElementById(id);
-let products=[],stocks=[],counts=[],selectedProduct=null;
-const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const pick=(o,...ks)=>{for(const k of ks)if(o?.[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k];return ''};
-function msg(t,ok=false){$('inventoryMsg').textContent=t;$('inventoryMsg').style.color=ok?'#17633f':'#a12d35'}
-async function init(){try{const p=await sb.from('productos').select('*');if(p.error)throw p.error;products=p.data||[];const s=await sb.from('lotes_stock').select('*');if(s.error)throw s.error;stocks=s.data||[];await loadCounts();$('status').textContent=`✓ ${products.length} productos conectados`;}catch(e){$('status').textContent='Error de conexión';msg('No se pudo conectar: '+e.message)}}
-function search(){const q=$('invSearch').value.trim().toLowerCase();if(!q){$('results').innerHTML='';return}const rows=products.filter(p=>JSON.stringify(p).toLowerCase().includes(q)).slice(0,12);$('results').innerHTML=rows.map((p,i)=>`<button class="result" data-i="${i}">${esc(pick(p,'codigo','cod','id'))} — ${esc(pick(p,'descripcion','nombre','desc_material'))}</button>`).join('');rows.forEach((p,i)=>$('results').children[i].onclick=()=>select(p));}
-function select(p){selectedProduct=p;$('results').innerHTML='';$('invSearch').value=pick(p,'codigo','cod','id');$('selectedProduct').innerHTML=`<strong>${esc(pick(p,'codigo','cod','id'))}</strong> — ${esc(pick(p,'descripcion','nombre','desc_material'))}<br><small>${esc(pick(p,'linea','línea'))}</small>`;}
-async function save(){if(!selectedProduct)return msg('Selecciona un producto.');const qty=$('invQty').value;if(qty==='')return msg('Ingresa la cantidad.');if(!$('invVencimiento').value)return msg('Ingresa el vencimiento.');const row={id:String(pick(selectedProduct,'codigo','cod','id'))+'_'+Date.now(),codigo:String(pick(selectedProduct,'codigo','cod','id')),descripcion:String(pick(selectedProduct,'descripcion','nombre','desc_material')),linea:String(pick(selectedProduct,'linea','línea')),cantidad:Number(qty),cajas:Number($('invCajas').value||0),unidades:Number($('invUnidades').value||0),vencimiento:$('invVencimiento').value,fecha:new Date().toISOString().slice(0,10),usuario:'CALIP'};msg('Guardando...',true);const {error}=await sb.from('lotes_conteo').insert(row);if(error)return msg('No se pudo guardar: '+error.message);msg('✓ Conteo guardado en Supabase.',true);$('invQty').value='';$('invCajas').value=0;$('invUnidades').value=0;$('invVencimiento').value='';await loadCounts();}
-async function loadCounts(){const {data,error}=await sb.from('lotes_conteo').select('*').order('created_at',{ascending:false}).limit(500);if(error)return msg('Error leyendo conteos: '+error.message);counts=data||[];render();}
-function render(){$('inventoryBody').innerHTML=counts.map(x=>{const stock=stocks.filter(s=>String(s.codigo||'')===String(x.codigo||'')).reduce((a,s)=>a+Number(s.cantidad||0),0);const c=Number(x.cantidad||0);return `<tr><td>${esc(x.codigo)}</td><td>${esc(x.descripcion)}</td><td>${esc(x.linea)}</td><td>${esc(x.vencimiento)}</td><td>${stock}</td><td>${c}</td><td>${c-stock}</td><td>${esc(x.cajas)}</td><td>${esc(x.unidades)}</td><td>${esc(x.fecha)}</td></tr>`}).join('')}
-$('invSearch').addEventListener('input',search);$('saveCount').addEventListener('click',save);$('reload').addEventListener('click',loadCounts);init();
+const cfg = window.CALIP_CONFIG || {};
+
+let sb = null;
+let products = [];
+let counts = [];
+let stocks = [];
+let selectedProduct = null;
+
+const $ = (id) => document.getElementById(id);
+
+function esc(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function setStatus(text, type = "") {
+  const el = $("status");
+  if (!el) return;
+
+  el.textContent = text;
+  el.className = "connection " + type;
+}
+
+function getValue(obj, keys) {
+  for (const key of keys) {
+    if (
+      obj &&
+      obj[key] !== undefined &&
+      obj[key] !== null &&
+      String(obj[key]).trim() !== ""
+    ) {
+      return obj[key];
+    }
+  }
+  return "";
+}
+
+function productCode(p) {
+  return getValue(p, ["codigo", "cod", "id"]);
+}
+
+function productDescription(p) {
+  return getValue(p, [
+    "descripcion",
+    "nombre",
+    "desc_material",
+    "producto",
+    "description"
+  ]);
+}
+
+function productLine(p) {
+  return getValue(p, ["linea", "línea", "categoria", "categoría"]);
+}
+
+function showMessage(text, type = "error") {
+  let box = $("message");
+
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "message";
+    box.className = "message";
+    const main = document.querySelector(".main-content") || document.body;
+    main.prepend(box);
+  }
+
+  box.textContent = text;
+  box.className =
+    "message " + (type === "success" ? "message-success" : "message-error");
+
+  setTimeout(() => {
+    if (box) box.textContent = "";
+  }, 5000);
+}
+
+function searchProducts() {
+  const input = $("invSearch");
+  const results = $("results");
+
+  if (!input || !results) return;
+
+  const text = input.value.trim().toLowerCase();
+
+  if (!text) {
+    results.innerHTML = "";
+    return;
+  }
+
+  const found = products
+    .filter((p) => {
+      const code = String(productCode(p)).toLowerCase();
+      const desc = String(productDescription(p)).toLowerCase();
+      const line = String(productLine(p)).toLowerCase();
+
+      return (
+        code.includes(text) ||
+        desc.includes(text) ||
+        line.includes(text)
+      );
+    })
+    .slice(0, 20);
+
+  if (!found.length) {
+    results.innerHTML =
+      '<div class="selected-product">No se encontró ningún producto.</div>';
+    return;
+  }
+
+  results.innerHTML = found
+    .map(
+      (p, index) => `
+        <button
+          type="button"
+          class="product-result"
+          data-index="${index}"
+          style="
+            display:block;
+            width:100%;
+            text-align:left;
+            margin-top:6px;
+            background:#fff;
+            border:1px solid #dce5e1;
+            color:#18212b;
+          "
+        >
+          <strong>${esc(productCode(p))}</strong>
+          — ${esc(productDescription(p))}
+          ${
+            productLine(p)
+              ? `<small style="display:block;color:#68756f;margin-top:3px;">
+                   Línea: ${esc(productLine(p))}
+                 </small>`
+              : ""
+          }
+        </button>
+      `
+    )
+    .join("");
+
+  results.querySelectorAll(".product-result").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.index);
+      selectProduct(found[index]);
+    });
+  });
+}
+
+function selectProduct(product) {
+  selectedProduct = product;
+
+  const code = productCode(product);
+  const desc = productDescription(product);
+  const line = productLine(product);
+
+  if ($("invSearch")) $("invSearch").value = code;
+
+  if ($("selectedProduct")) {
+    $("selectedProduct").innerHTML = `
+      <strong>${esc(code)}</strong> — ${esc(desc)}
+      ${line ? `<br><small>Línea: ${esc(line)}</small>` : ""}
+    `;
+  }
+
+  if ($("results")) $("results").innerHTML = "";
+
+  if ($("invQty")) {
+    $("invQty").focus();
+  }
+}
+
+async function loadProducts() {
+  setStatus("Cargando productos...", "");
+
+  const { data, error } = await sb
+    .from("productos")
+    .select("*");
+
+  if (error) {
+    console.error("Error productos:", error);
+    setStatus("Error de conexión", "offline");
+    showMessage("No se pudieron cargar los productos: " + error.message);
+    return false;
+  }
+
+  products = Array.isArray(data) ? data : [];
+
+  setStatus(
+    `Conectado · ${products.length} productos`,
+    "online"
+  );
+
+  console.log("Productos cargados:", products.length);
+
+  return true;
+}
+
+async function loadCounts() {
+  const { data, error } = await sb
+    .from("lotes_conteo")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error("Error conteos:", error);
+    showMessage("Error al cargar conteos: " + error.message);
+    counts = [];
+    renderCounts();
+    return;
+  }
+
+  counts = Array.isArray(data) ? data : [];
+  renderCounts();
+}
+
+async function loadStocks() {
+  const { data, error } = await sb
+    .from("lotes_stock")
+    .select("*")
+    .limit(1000);
+
+  if (error) {
+    console.error("Error stock:", error);
+    stocks = [];
+    return;
+  }
+
+  stocks = Array.isArray(data) ? data : [];
+  renderCounts();
+}
+
+function renderCounts() {
+  const body = $("inventoryBody");
+
+  if (!body) return;
+
+  if (!counts.length) {
+    body.innerHTML = `
+      <tr>
+        <td colspan="10" style="text-align:center;padding:25px;">
+          No hay conteos registrados.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  body.innerHTML = counts
+    .map((c) => {
+      const code = getValue(c, ["codigo", "cod", "id"]);
+      const desc = getValue(c, [
+        "descripcion",
+        "nombre",
+        "desc_material"
+      ]);
+      const line = getValue(c, ["linea", "línea"]);
+
+      const qty = Number(
+        getValue(c, ["cantidad", "conteo", "qty"]) || 0
+      );
+
+      const stock = stocks
+        .filter(
+          (s) =>
+            String(getValue(s, ["codigo", "cod", "id"])) ===
+            String(code)
+        )
+        .reduce(
+          (total, s) =>
+            total + Number(getValue(s, ["cantidad", "stock"]) || 0),
+          0
+        );
+
+      const difference = qty - stock;
+
+      const date =
+        getValue(c, ["fecha", "fecha_conteo", "created_at"]) || "";
+
+      const expiration =
+        getValue(c, ["vencimiento"]) || "";
+
+      const boxes =
+        Number(getValue(c, ["cajas"]) || 0);
+
+      const units =
+        Number(getValue(c, ["unidades"]) || 0);
+
+      return `
+        <tr>
+          <td>${esc(code)}</td>
+          <td>${esc(desc)}</td>
+          <td>${esc(line)}</td>
+          <td>${esc(expiration)}</td>
+          <td>${stock}</td>
+          <td>${qty}</td>
+          <td>${difference}</td>
+          <td>${boxes}</td>
+          <td>${units}</td>
+          <td>${esc(date)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+async function saveCount() {
+  if (!selectedProduct) {
+    showMessage("Selecciona un producto.");
+    return;
+  }
+
+  const qtyValue = $("invQty")?.value;
+  const boxesValue = $("invCajas")?.value || 0;
+  const unitsValue = $("invUnidades")?.value || 0;
+  const expiration = $("invVencimiento")?.value || null;
+
+  if (qtyValue === "") {
+    showMessage("Ingresa la cantidad contada.");
+    $("invQty")?.focus();
+    return;
+  }
+
+  const quantity = Number(qtyValue);
+  const boxes = Number(boxesValue);
+  const units = Number(unitsValue);
+
+  if (Number.isNaN(quantity) || quantity < 0) {
+    showMessage("La cantidad no es válida.");
+    return;
+  }
+
+  const code = productCode(selectedProduct);
+  const desc = productDescription(selectedProduct);
+  const line = productLine(selectedProduct);
+
+  const deviceId =
+    localStorage.getItem("calip_device_id") ||
+    "dev_" + crypto.randomUUID();
+
+  localStorage.setItem("calip_device_id", deviceId);
+
+  const row = {
+    id: crypto.randomUUID(),
+    codigo: String(code),
+    descripcion: String(desc),
+    linea: String(line || ""),
+    cantidad: quantity,
+    cajas: boxes,
+    unidades: units,
+    vencimiento: expiration,
+    fecha: new Date().toISOString().slice(0, 10),
+    usuario: "apazayeferson422",
+    device_id: deviceId,
+    version: 1,
+    actualizado_en: new Date().toISOString()
+  };
+
+  const { error } = await sb
+    .from("lotes_conteo")
+    .insert(row);
+
+  if (error) {
+    console.error("Error guardando:", error);
+    showMessage("No se pudo guardar: " + error.message);
+    return;
+  }
+
+  showMessage("Conteo guardado correctamente.", "success");
+
+  if ($("invQty")) $("invQty").value = "";
+  if ($("invCajas")) $("invCajas").value = "0";
+  if ($("invUnidades")) $("invUnidades").value = "0";
+  if ($("invVencimiento")) $("invVencimiento").value = "";
+  if ($("invSearch")) $("invSearch").value = "";
+
+  if ($("selectedProduct")) {
+    $("selectedProduct").innerHTML = "Selecciona un producto.";
+  }
+
+  if ($("results")) $("results").innerHTML = "";
+
+  selectedProduct = null;
+
+  await loadCounts();
+}
+
+async function init() {
+  try {
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_PUBLISHABLE_KEY) {
+      setStatus("Configuración faltante", "offline");
+      showMessage("Falta la configuración de Supabase.");
+      return;
+    }
+
+    if (!window.supabase || !window.supabase.createClient) {
+      setStatus("Supabase no cargó", "offline");
+      showMessage("No se pudo cargar la librería de Supabase.");
+      return;
+    }
+
+    sb = window.supabase.createClient(
+      cfg.SUPABASE_URL,
+      cfg.SUPABASE_PUBLISHABLE_KEY
+    );
+
+    setStatus("Conectando...", "");
+
+    const ok = await loadProducts();
+
+    if (!ok) return;
+
+    await loadCounts();
+    await loadStocks();
+
+  } catch (error) {
+    console.error("Error inicializando CALIP:", error);
+    setStatus("Error de conexión", "offline");
+    showMessage("Error al iniciar CALIP: " + error.message);
+  }
+}
+
+/* EVENTOS */
+document.addEventListener("DOMContentLoaded", () => {
+  $("invSearch")?.addEventListener("input", searchProducts);
+
+  $("saveCount")?.addEventListener("click", saveCount);
+
+  $("reload")?.addEventListener("click", async () => {
+    await loadCounts();
+    await loadStocks();
+  });
+
+  init();
+});
